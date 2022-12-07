@@ -53,6 +53,8 @@ The schema and explanation of each variable in the files:
 * model.ipynb - notebook of training model and evaluation
 * profile.csv - processed data used in model.ipynb
 * Report.pdf - report of this project
+* Udacity Reviews.pdf - reviews of project
+* report.tex - tex file of report
 * README.md
 
 ## Library
