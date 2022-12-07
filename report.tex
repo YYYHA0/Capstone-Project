@@ -1,0 +1,814 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{geometry}
+\usepackage[colorlinks=true,urlcolor=blue]{hyperref}
+
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{subfigure}
+\usepackage{enumerate}
+\usepackage{multicol}
+
+\usepackage{graphicx}
+\usepackage{pythonhighlight}
+
+\geometry{textheight=27cm} 
+\setlength{\parskip}{0.5em}
+\setlength{\parindent}{0pt} 
+\renewcommand\thesection{\Roman{section}} 
+\graphicspath{{/Users/haoyun/Documents/ML-U/report/fig}}
+\columnseprule=0.5pt
+
+\title{Machine Learning Engineer Nanodegree \\ Capstone Project}
+\author{Hao Yun}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Definition}
+
+\subsection*{Project Overview}
+
+A successful reward program can benefit a company in attracting and retaining customers. A variety of rewards are provided in 
+the market. People may respond differently to certain type of rewards. Comparing with giving the whole population the same 
+reward, providing variant rewards at an individual personalized level not only helps companies improve the profitability, but 
+also improves customer experience.
+
+Starbucks has provided a dataset containing simulated data that mimics customer behavior on the Starbucks rewards mobile app 
+\cite{StarbucksDataset}. Analyzing demographic data and transactional data helps Starbucks understand cutsomers better. And 
+contributing a statistical model or a machine learning model based on these data can help marketers know customer preferences, 
+evaluate products and services, predict trends in the future and make new marketing strategies.
+
+\subsection*{Problem Statement}
+
+The Starbucks dataset exists as three separate files including offer information, demographic data and records of transactions 
+during the test month. In this capstone project, two main problems can be solved by analyzing this dataset. One objective is to 
+predict how much a customer will spend at Starbucks during the experiment period. Another is to predict the probability that a 
+customer will complete a reward, so that Starbucks can come up with new strategies to determine what kind of reward will be 
+more appropriate for a certain customer.
+
+The problem requires the predictions of continuous output variables. This is obviously a supervised learning problem, more 
+precisely, a regression problem. The target variables are the total amount that each customer spends at Starbucks and the 
+probability that each customer completes offers. The main task is to learn a mapping from multiple input variables to 
+numerical variables. Various kinds of algorithms can be used to solve this problem. In this project, three algorithms will be 
+implemented: linear regression, xgboost and neural network.
+
+After modeling, output values of an amount and a probability will be predicted from the input data. Then the result will be 
+compared with the true values.
+
+\subsection*{Metrics}
+
+Mean Absolute Error (MAE) is a measure of errors between paired observations expressing the same phenomenon and is calculated 
+as the sum of absolute errors divided by the sample size \cite{MAE}:
+
+\begin{equation}
+    MAE = \frac{\Sigma_{i=1}^{n}|y_{i} - \hat{y}_{i}|}{n}
+\end{equation}
+
+In this project, the main task is to solve a regression problem. MAE is an appropriate metric that can be used to quantify the 
+performance of a regression model. A low MAE means that predicted values are close to true values.
+
+Root Mean Square Error (RMSE) is another popular metric for continuous variables \cite{MAE/RMSE}:
+
+\begin{equation}
+    RMSE = \sqrt{\frac{\Sigma_{i=1}^{n}(y_{i} - \hat{y}_{i})^2}{n}}
+\end{equation}
+
+RMSE penalizes the higher difference more than MAE. And MAE is robust to outliers whereas RMSE is not. Both input data and 
+output data will be normalized in a certain range because it's necessary for neural network. There won't be great difference 
+between predicted values and true values. In this case, MAE is a better metric to evaluate models.
+
+\section{Analysis}
+
+\subsection*{Data Exploration and Visualization}
+
+Starbucks dataset contains three json files:
+
+\begin{itemize}
+
+    \item portfolio.json - containing offer ids and meta data about each offer (duration, type, etc.)
+    \item profile.json - demographic data for each customer (customer id, age, income, etc.)
+    \item transcript.json - records for transactions, offers received, offers viewed, and offers completed
+
+\end{itemize}
+
+17000 customers personal data is provided in profile. There are 10 different offers in this test. And 17000 customers generated 
+306534 transaction records during 30 days.
+
+The first step is to combine these files, then select variables that will be used in the model. 
+
+\subsubsection*{i) Univariate Analysis}
+
+According to the problems to be solved, the target variables are the total amount that each customer spends at Starbucks 
+($total\_amount$) and the probability that each customer completes offers ($p\_completed$). Both target variables are numeric 
+and continuous.
+
+The experiment lasted about a month. The plot below shows that the majority of the customers spent less than \$400 during this 
+period. Evidently it exists some outliers among the variable $total\_amount$. And $total\_amount$ has a wide range, while 
+$p\_completed$ has a small range. So the target variables still need some processing.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\textwidth]{target.png} 
+    \caption{Distribution of Target Variable}
+\end{figure}
+
+And 5 variables are selected as input:
+
+\begin{itemize}
+
+    \item age (int) - age of the customer
+    \item gender (str) - gender of the customer (note some entries contain 'O' for other rather than M or F)
+    \item income (float) - customer's income
+    \item n\_received (int) - the number of times the customer received offers
+    \item p\_viewed (float) - the proportion of offers the customer have viewed
+
+\end{itemize}
+
+\begin{figure}[H]
+    \centering
+    \subfigure{\includegraphics[width=0.92\textwidth]{input1.png}}
+    \subfigure{\includegraphics[width=0.92\textwidth]{input2.png}}
+    \caption{Distribution of Input Variable}
+\end{figure}
+
+$gender$ is a categorical variable, the others are numerical variables. $age$, $gender$ and $income$ are from the file 
+profile.json. The other variables may need more explanation. 
+
+1. total\_amount and p\_completed
+
+In this simulated data, there are three different kinds of offers: an advertisement for a drink and two actual rewards including 
+discount and BOGO (buy one get one free). Each offer has a validity period. If a customer opens the offer and has records of 
+transactions during this validity period, we can assume that the customer is influenced by this offer. Unfortunately, by 
+analyzing the data, I found that the real scenarios are complicated. The following situations make the problems more difficult:
+
+\begin{enumerate}[1)]
+
+    \item When customers receive a bogo/discount reward, offer status (event) can be: offer received, offer viewed and offer 
+    completed. But there are only two possible status for an advertisement: offer received and offer viewed. There isn't a 
+    condition to determine whether this offer is completed. 
+
+    \item It's possible for a customer to receive more than one offer at the same time. One transaction can be used for multiple 
+    offers as long as the transaction occurs during the validity period. Therefore we can't recognise which transaction is 
+    affected by which offer.
+
+    \item Some transactions happens during a validity period of an offer, but the offer isn't completed.
+    
+    \item An offer has been completed but the customer never opens the offer.
+
+\end{enumerate}
+
+As a simplification, if a bogo/discount offer isn't completed, the transactions happens during the validity period might be 
+considered as transactions affected by an advertisement. And when an offer is completed, the customer has spent at least an 
+amount of money which is equal to the difficulty of this offer. So the amount of completed offers is calculated from the 
+difficulty of these offers. Additionally, total amount and completed amount must have a high correlation, because customers who 
+spend more money may have higher completed amount values. Therefore, percentage of completed offers is selected as a target 
+feature.
+
+2. n\_received and p\_viewed
+
+The dataset description doesn't mention the rules for sending offers to customers. However, the histogram above shows that the 
+frequency customers receive the offers is quite different. This may influence the amount customers spend at Starbucks. A 
+customer who receives more offers may buy more products. So I count the number of times each customer received offers. For the 
+same reason, to avoid high correlation between the number of times that customer received offers and viewed offers, the 
+proportion of offers the customer have viewed is selected as input.
+
+3. other variables
+
+In fact, the dataset contains more than these variables, like $difficulty$ (minimum required spend to complete a reward), 
+$duration$ (time for offer to be open, in days), $time$ (time in hours that describe when a transaction happens since start of 
+test), etc. These variables are useful, but it isn't meaningful to use them directly to predict the amount. Instead, they are 
+used to generate new variables mentioned above.
+
+There is another variable $became\_member\_on$ that describes date when customer created an account. In general, the length of 
+time a person becomes a member will influence customer behavior. But in this dataset, the time when this test started is not 
+provided. This variable doesn't seem useful and is not selected.
+
+Below, an example of input variables and target variables:
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|c|c|c|c|c|c|c|}
+    \hline
+    gender&age&income&n\_received&p\_viewed&total\_amount&p\_completed\\
+    \hline
+    F&55&112000&2&0&77.01&0.0649\\
+    \hline
+    F&75&100000&4&1&159.27&0.1256\\
+    \hline
+    M&68&70000&4&0.75&57.73&0.2598\\
+    \hline
+    M&65&53000&6&1&36.43&0.9607\\
+    \hline
+    \end{tabular} 
+    \caption{Profile}
+\end{table}
+
+\subsubsection*{ii) Bi-variate Analysis}
+
+Pearson correlation coefficient can show correlations between two numeric variables. The table below shows that $income$ and 
+$total\_amount$ have the largest correlation coefficient. This means that high-income customers spend more at Starbucks. 
+
+\begin{table}[H]
+    \centering
+    \scriptsize 
+    \begin{tabular}{|l|l|l|l|l|l|l|}
+    \hline
+               & age       & income    & total\_amount & p\_completed & n\_received & p\_viewed \\
+    \hline
+    age           & 1.000000  & 0.306703  & 0.105787      & -0.001228    & -0.005827   & 0.049157  \\
+    \hline
+    income        & 0.306703  & 1.000000  & 0.315033      & -0.052571    & -0.006450   & 0.069018  \\
+    \hline
+    total\_amount & 0.105787  & 0.315033  & 1.000000      & -0.168666    & 0.090215    & 0.175591  \\
+    \hline
+    p\_completed  & -0.001228 & -0.052571 & -0.168666     & 1.000000     & 0.187172    & -0.000305 \\
+    \hline
+    n\_received   & -0.005827 & -0.006450 & 0.090215      & 0.187172     & 1.000000    & -0.061819 \\
+    \hline
+    p\_viewed     & 0.049157  & 0.069018  & 0.175591      & -0.000305    & -0.061819   & 1.000000 \\
+    \hline
+    \end{tabular}
+    \caption{Pearson Correlation Coefficient}
+\end{table}
+
+Making scatter plot or box plot is another powerful method to find out the relationship between two variables. $age$ and $income$ 
+also have a high correlation coefficient. So I create a scatter plot.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.65\textwidth]{scatter.png} 
+    \caption{Relationship between age and income}
+\end{figure}
+
+Figure 3 shows that younger people have lower income. It's reasonable since young people always have less work experience. Few 
+of them can get high income.
+
+Intuitively, there may be a high correlation between some variables, for example $n\_received$ and $total\_amount$, because 
+customers will spend more when they receive more offers. But in the table of correlation coefficient, the actual coefficient is 
+0.090215 which is close to 0. So I make a box plot.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.65\textwidth]{box.png} 
+    \caption{Relationship between n\_received and total\_amount}
+\end{figure}
+
+The result is as expected. There is a trend between $n\_received$ and $total\_amount$. Another important point to note is that 
+it exists outliers. This may be the reason that the correlation coefficient of the two variables is close to 0.
+
+After analyzing the correlations between numeric variables, find the relationship between categorical variable and numeric 
+variables. Figure 5 shows that $gender$ may have an effect on $total\_amount$. But the difference between $gender$ and 
+$p\_completed$ is not significant.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\textwidth]{group.png} 
+    \caption{Relationship between gender and total\_amount/p\_completed}
+\end{figure}
+
+\subsubsection*{iii) Missing Value Treatment}
+
+After combining the files, profile contains 17000 observations and 7 variables. There are missing values in the dataframe. 
+$gender$ and $income$ have 2175 missing values for the same samples which record 118 for $age$. 118 is obviously a default value 
+for the variable $age$. In this case, if I replace all missing values with the same value of mean, median or mode, these samples 
+will be considered to be similar. This might affect the accuracy of the model. So to delete these samples is a better way. After 
+deleting miss values, profile has 14825 samples left.
+
+\subsubsection*{iv) Outlier Treatment}
+
+The box plot and the distribution show that there is outliers. Z-score is a statistical measure that can be used to detect 
+outliers:
+
+\begin{equation}
+    z = \frac{x - \mu}{\sigma}
+\end{equation}
+
+where $\mu$ is mean of the variable, and $\sigma$ is standard deviation.
+
+After the preprocessing, all variables will follow standard normal distribution. Z-score greater than +3 or less than -3 is 
+considered as outliers. Then I remove the observations that has an absolute value of the z-score greater than 3. Finally, 
+profile has 14110 observations.
+
+\subsection*{Algorithms and Techniques}
+
+The problem to be solved is a regression problem. The target variables are the total amount that each customer spends at 
+Starbucks ($total\_amount$) and the probability that each customer completes offers ($p\_completed$). In this project, three 
+algorithms are implemented:
+
+\subsubsection*{i) Linear Regression}
+
+Linear Regression is always used for finding out a linear relationship between variables and forecasting. In this problem, the 
+task is to learn a mapping from 5-dimention input to 2-dimention output, then to predict the target variables. So it's a 
+multivariate regression. And it's an appropriate and simple method to solve this problem. A linear regressor can be directly 
+implemented by using the package \texttt{sklearn}.
+
+\subsubsection*{ii) XGBoost}
+
+Considering the relationship between input and output may be non-linear, XGBoost and neural network which are non-linear 
+algorithms are implemented to solve the problem. XGBoost is an effective algorithms and can get a high prediction accuracy. But 
+xgboost doesn't support multiple output. \texttt{sklearn} provided a module \texttt{sklearn.multioutput.MultiOutputRegressor} 
+which enables model to fit one regressor per target.
+
+\subsubsection*{iii) Neunal Network}
+
+There are different types of neural networks, such as Artificial Neural Network (ANN), Recurrent Neural Network (RNN) and 
+Convolutional Neural Network (CNN) \cite{nn}. RNN is generally used to solve time series problems, or to deal with language 
+problems. CNN is designed specifically for computer vision. It's a powerful algorithm to handle the pixel data.
+
+ANN consists of neurons, synapses, weights, biases, and functions, and is used to model complex non-linear relationships. An ANN 
+is created by using \texttt{TensorFlow} and \texttt{keras}.
+
+\subsection*{Benchmark}
+
+A multivariate linear regression model will be used as a benchmark model, because it's easy to implement and efficient to train. 
+MAE measures, on average, the absolute values of the differences between predicted values and true values. It is used to 
+determine whether other models are better compared with the linear regression model.
+
+Since the data is scaled, after fitting the linear regressor, MAE is 0.1401. The scaled predictions can't show whether the model 
+is good or not. So I unscale the predictions to origin form. And MAE for the two target is 30.4583. MAE of $total\_amount$ is 
+60.7934. MAE of $p\_completed$ is 0.1231. This means that the prediction of $total\_amount$ has an error of \$60.7934 on average, 
+and that the error of the probability that a customer complete offers is $12.31\%$ on average.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\textwidth]{lr.png} 
+    \caption{Results of Predictions Compared with Actual Data}
+\end{figure}
+
+The figure above shows that the majority of the points are distributed around the line $x = y$. But many of them are not close 
+to the line. For the points whose actual value is 0, the predictions of linear regression are not accurate.
+
+\section{Methodology}
+
+\subsection*{Data Preprocessing}
+
+Data processing contains the following steps:
+
+\begin{itemize}
+
+    \item Data Conversion
+    \item Feature Extraction
+    \item Missing Values and Outliers Treatment
+    \item Spliting Training Data and Test Data
+    \item Feature scaling
+
+\end{itemize}
+
+\subsubsection*{i) Data Conversion}
+
+Converting data into a concise format can simplify analyzing and present information more clearly. In Starbucks dataset, some 
+variables need to be converted. Before this, the first step is to create three dataframe for each json file.
+
+\textbf{id in dataframe profile \& person in dataframe transcript}
+
+The two variables in different files represent the same information of customer id. They are in format long strings. It's not 
+easy to identify each customer. So I replace customer id with integers.
+
+\textbf{value in dataframe transcript}
+
+In dataframe transcript, the variable $value$ is in format dictionary which contains only one element and can be considered as 
+additional information for the column $event$. If a customer behavior is related to an offer, $value$ will be an id 
+corresponding to this offer. And if a customer has purchased a product, $value$ will be the amount this customer spent.
+
+I separate dataframe transcript into trans and event. Dataframe trans contains all transactional events. Dataframe event 
+contains all information about offer including offer id and status of offer i.e. offer received, offer viewed and offer 
+completed.
+
+Then I transform variable $value$ in both dataframe, convert the dictionary format into its value. After transformations, 
+$value$ in dataframe trans is float representing amount of each transaction. And $value$ in dataframe event is string 
+representing offer id.
+
+\textbf{value in dataframe event and id in datafram portfolio}
+
+The two variables in different files represent the same information of offer id. Treatment for these two variables are same as 
+customer id.
+
+\subsubsection*{ii) Feature Extraction}
+
+This dataset is provided without a specific purpose on kaggle. Users can come up with some marketing strategies by analyzing 
+this dataset. I want to predict the amount a customer will spend at Starbucks during the experiment period and to predict the 
+probability that a customer will complete a reward. So I need to get the two target features. Additionally, not all variables 
+can be used directly in models. I need to extract more variable from existing data.
+
+\textbf{total\_amount}
+
+A function \texttt{calculate\_amount} is created to calculate the amount have been spent of each customer. Parameters are an 
+integer as customer id and a datafram containing transactional records which is the dataframe trans here. It returns a float 
+which is total amount the customer has spent. Then loop through each customer id using this function to get the $total\_amount$ 
+list, and insert this list in dataframe profile. 
+
+\begin{python}
+    def calculate_amount(id, trans_df):
+        """ Given an id and a dataframe, calculate the total amount of money a person spent
+        :param id: int, person id
+        :param trans_df: dataframe, transcript with information of amount
+        :return: float, the total amount of money the person (id) spent
+        """
+        return trans_df.loc[trans_df['person'] == id]['amount'].sum()
+
+\end{python}
+
+\textbf{p\_completed}
+
+In order to get more information in detail, a function \texttt{user\_transcript} is created. It takes an customer id and a 
+dataframe transcript as input, and returns a sub\-dataframe with all actions of this customer.
+
+\begin{python}
+    # get one user's transcript
+    def user_transcript(user_id, transcript):
+        """ Given a user id, create a dataframe containing all actions of this user
+        :param user: int
+        :param transcript: a dataframe (transcript)
+        :return: a subset of the dataframe corresponding to the given id
+        """
+        user_actions = transcript.loc[transcript['person'] == user_id]
+        return user_actions
+\end{python}
+
+More information can be found by seeing one customer's transcript.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\textwidth]{trans.png} 
+    \caption{Transcript of Customer 0}
+\end{figure}
+
+To check the frequency of each offer in dataframe transcript, I found that $event$ which describe offer status has difference 
+between reward offers and advertisement. If an offer type is bogo or discount, when offers are sent to customers, it can be 
+three status: offer received, offer viewed and offer completed. But for advertisement, there are only two possible status: offer 
+received and offer viewed. Because advertisement doesn't have an difficulty or reward, there is no condition to determine 
+whether it is completed. 
+
+From customer 0's transcript, we can see that this customer received respectively discount3 and discount2 at time 408 and 504. 
+The three transactions which happened from 510 to 552 helped customer 0 completed the two offers at the same time.
+
+This also happens for advertisement. It's possible for a customer to receive more than one offer at the same time. Therefore I 
+can't recognise a transaction is affected by an advertisement or a reward.
+
+More difficulties have been discussed in the previous section. So I calculate the amount of completed offers for each customer 
+($offer\_amount$) with function \texttt{calculate\_amount}. To avoid high correlation between $total\_amount$ and 
+$offer\_amount$, I calculate the percentage of completed offers ($p\_completed$). Then insert $p\_complete$ into dataframe 
+profile.
+
+\textbf{n\_received}
+
+Considering the frequency customers receive the offers is quite different. This may influence the amount customerss spend at 
+Starbucks. A customer who receives more offers may buy more products. So I count the number of times customer have received 
+offers with function \texttt{count\_offers}.
+
+\begin{python}
+    def count_offers(user_transcript, offer_status):
+        """ Given a user's transcript, count how many times the status appears
+        :param user_transcript: dataframe, a user transcript
+        :param offer_status: str, 'offer received' or 'offer viewed'
+        :return: int, times the str appears
+        """
+        status_df = user_transcript.loc[user_transcript['event'] == offer_status]
+        return status_df.shape[0]
+\end{python}
+
+This function takes in a datafram and an offer status, and counts the times the status appears. After loop through each 
+customers, insert $n\_received$ into dataframe profile.
+
+\textbf{p\_viewed}
+
+Using the function \texttt{count\_offers} again, I get a new variables $n\_viewed$. Then I calculate $p\_viewed$. For the same 
+reason as $p\_completed$, I keep the variable $p\_viewed$ as input.
+
+\subsubsection*{iii) Missing Values and Outliers Treatment}
+
+Missing values and outliers are deleted from dataframe profile. The reasons and rules are explained in the previous section. The 
+figure below shows the datafram of missing values.
+
+Outliers are detected by z-score. Value which has an absolute value of the z-score greater than 3 is regarded as outlier.
+
+After this step, profile has 14110 observations.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\textwidth]{missing.png} 
+    \caption{Transcript of Customer 0}
+\end{figure}
+
+\subsubsection*{iv) Spliting Training Data and Test Data}
+
+I use \texttt{sklearn.model\_selection.train\_test\_split} to split the dataframe into training data and test data. 25\% samples 
+are allocated to the test data.
+
+\subsubsection*{v) Feature scaling}
+
+I use \texttt{sklearn.preprocessing.MinMaxScaler} to normalize training data. And it should be noted that the test data should 
+be scaled with the same scaler as training data. After fitting estimators and prediction, the predicted values should be 
+unscaled using the same scaler. 
+
+For neural network, data normalisation or standardization is a required step and very important. However in a linear regression 
+and xgboost, this step is not necessary. Considering different variables have quite different range in this dataset, data will 
+be scaled for all models in this project.
+
+\subsection*{Implementation}
+
+In this project, the task is to learn a mapping from 5-dimention input to 2-dimention output. Three algorithms are implemented 
+to solve the problem. All algorithms are built-in machine learning algorithms provided by python libraries.
+
+The models can be implemented by the following steps: 
+
+\begin{enumerate}[1)]
+
+    \item Creating an estimator
+    \item Fitting the estimator with the scaled training data
+    \item Predicting on test data
+    \item Calculating MAE for predictions
+    \item Unscaling predicted data
+    \item Comparing the results with actual data
+
+\end{enumerate}
+
+However, in the process of implementation, there are still differences among the models.
+
+\subsubsection*{i) Linear Regression}
+
+Linear regression is selected as benchmark model. It supports multiple outputs directly. A linear regression estimator can be 
+created by using \\
+\texttt{sklearn.linear\_model.LinearRegression}. Then the steps are the same as the above process.
+
+\subsubsection*{ii) XGBoost}
+
+XGBoost is different from linear regression, because this algorithm is designed for predicting a single numeric value. 
+Fortunately, \texttt{sklearn} provided a module \texttt{sklearn.multioutput.MultiOutputRegressor} . This strategy enables model 
+to fit one regressor per target. 
+
+I use library \texttt{xgboost} to create an estimator. Many parameters in xgboost can be trained. I select eight of them to not 
+use the default values:
+
+\begin{itemize}
+
+    \item n\_estimators = 500
+    \item max\_depth = 5
+    \item min\_child\_weight = 3
+    \item learning\_rate = 0.025
+    \item gamma = 0.2
+    \item subsample = 0.9
+    \item colsample\_bytree = 0.7
+    \item reg\_lambda = 0.5
+
+\end{itemize}
+
+Then \texttt{sklearn.multioutput.MultiOutputRegressor} helps me to fit the estimator for both target features using training 
+data. The last steps are the same as before.
+
+\subsubsection*{iii) Neunal Network}
+
+This algorithm is implemented with \texttt{TensorFlow} and \texttt{keras}. A multilayer perceptron (MLP) is a fully connected 
+class of artificial neural network (ANN). 
+
+Different number of layers and nodes of each layer has been tried for the network. Finally I create a MLP with 3 non-linear 
+hidden layers. The first two layers have 10 nodes each. The last layer has 2 nodes since the output is 2-dimention. For each 
+layer I use \texttt{TensorFlow} built-in activation function \texttt{tensorflow.nn.sigmoid}.
+
+There is one more step for this algorithm. The step is to compile model after creating the MLP model. 
+\texttt{tensorflow.keras.Model.compile} configures the model for training. It defines the optimizer, the loss function and the 
+metrics:
+
+\begin{itemize}
+
+    \item optimizer = tf.keras.optimizers.Adam(learning\_rate=0.001)
+    \item loss = tf.keras.losses.mean\_squared\_error
+    \item metrics = [tf.keras.metrics.MeanAbsoluteError()]
+
+\end{itemize}
+
+After compilation, fit model with training data, predict target variables using trained model, calculate MAE and compare results 
+with actual data.
+
+\subsection*{Refinement}
+
+This part is mainly for XGBoost regressor, since the result of multioutput-xgboost is just a little bit better than linear 
+regression which is benchmark model in this project.
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|l|l|l|}
+    \hline
+                        & linear regressor  & multioutput-xgboost regressor \\
+    \hline
+    total\_amount MAE   & 60.7934           & 60.0927 \\
+    \hline
+    p\_completed  MAE   & 0.1231            & 0.1224 \\
+    \hline
+    \end{tabular}
+    \caption{MAE of Benchmark Model and XGBoost Model}
+\end{table}
+
+In fact, there is a disadvantage when using \texttt{MultiOutputRegressor}. Although \texttt{MultiOutputRegressor} can fit one 
+regressor per target, the parameters of the regressors are same for different target features. So I split two target features 
+and train the models separately for the two target features. 
+
+This time, I want to search specified parameter values for the two models. I use \texttt{sklearn.model\_selection.GridSearchCV} 
+for parameter tuning. It's a powerful function provided in \texttt{sklearn}. It's efficient and allows more than one processes 
+running in parallel for training jobs. But this can take long time if there are many parameters. For example, in this problem of 
+predicting one feature, I chose 9 parameters in xgboost estimator. Each parameter has 3 values to try. There will be $3^9$ 
+models to train if I don't divide the work into two parts. Thus for each \texttt{XGBRegressor}, I use \texttt{GridSearchCV} two 
+times to get the parameters that make each model perform the best.
+
+\begin{multicols}{2}
+
+Parameters for total\_amount:
+
+\begin{itemize}
+
+    \item n\_estimators: 700
+    \item max\_depth: 6
+    \item min\_child\_weight: 5
+    \item learning\_rate: 0.02
+    \item gamma: 0.1
+    \item subsample: 0.8
+    \item colsample\_bytree: 0.6
+    \item reg\_lambda: 0.8
+    \item reg\_alpha: 0.6
+
+\end{itemize}
+
+Parameters for p\_completed:
+
+\begin{itemize}
+
+    \item n\_estimators: 800
+    \item max\_depth: 5
+    \item min\_child\_weight: 3
+    \item learning\_rate: 0.05
+    \item gamma: 0.5
+    \item subsample: 0.9
+    \item colsample\_bytree: 0.6
+    \item reg\_lambda: 0.4
+    \item reg\_alpha: 0.5
+
+\end{itemize}
+    
+\end{multicols}
+
+After getting the best estimators, make predictions separately using the two estimators for different features. Then I combine 
+the results, since if I don't combine them, the predictions can't be unscaled. Finally I can compare the result with benchmark 
+model and multioutput-xgboost model.
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|l|l|l|l|}
+    \hline
+                        & linear regressor & multioutput-xgboost & 2-xgboost \\
+    \hline
+    total\_amount MAE   & 60.7934          & 60.0927             & 59.9109 \\
+    \hline
+    p\_completed  MAE   & 0.1231           & 0.1224              & 0.1225 \\
+    \hline
+    \end{tabular}
+    \caption{MAE of Benchmark Model and XGBoost Models}
+\end{table}
+
+Comparing with the results of multioutput-xgboost, by training estimator separately, MAE of $total\_amount$ is reduced a bit but 
+not too much. Predictions of $p\_completed$ are not as good as multioutput-xgboost estimator.
+
+\section{Results}
+
+\subsection*{Model Evaluation and Validation}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\textwidth]{xgb.png} 
+    \caption{Results of Predictions Compared with Actual Data - XGBoost}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\textwidth]{tf.png} 
+    \caption{Results of Predictions Compared with Actual Data - MLP}
+\end{figure}
+
+Figure 9 and Figure 10 show that predictions of XGBoost model and MLP model are similar with benchmark model. Most of the points 
+located around the line $x = y$. But the variance of errors is not small. The two algorithms still don't solve the problem of 
+inaccuracy when predicting samples with actual value 0.
+
+Comparing these algorithms, XGBoost which was trained separately for each target feature performs the best among the three 
+models. It's better to predict target variables using this model.
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|l|l|l|l|}
+    \hline
+                        & total\_amount MAE & p\_completed  MAE \\
+    \hline
+    linear regressor    & 60.7934           & 0.1231 \\
+    \hline
+    multioutput-xgboost & 60.0927           & 0.1224 \\
+    \hline
+    2-xgboost           & 59.9109           & 0.1225 \\
+    \hline
+    MLP (ANN)           & 60.2638           & 0.1232 \\
+    \hline
+    \end{tabular}
+    \caption{MAE of All Models}
+\end{table}
+
+To guarantee that the model will work for similar unknown data. I repartitioned the dataset into training data and test 
+data to evaluate the model performance. Then create xgboost estimators using the same parameters and fit estimators with new 
+training data. Parameters of the best estimators are mentioned in previous section.
+
+MAEs of predictions on new data are 59.4792 for $total\_amount$ and 0.1264 for $p\_completed$. Errors of $total\_amount$ are 
+even lower than origin data. But predictions of $p\_completed$ are not as good as before. The prediction of $total\_amount$ has 
+an error of \$59.4792 on average, and that the error of the probability that a customer complete offers is $12.64\%$ on average.
+
+\subsection*{Justification}
+
+The performances of the three algorithms are quite similar. MAEs of each model are listed in Table 5. XGBoost gets the best 
+result with MAE values equal to 59.9109 and 0.1225 for $total\_amount$ and $p\_completed$ respectively.
+
+Linear regression was selected as benchmark model in this project. Comparing with the benchmark model, XGBoost estimator 
+performs better than it. This may because XGBoost is a non-linear algorithm. And I trained two models for different target 
+features, and tuned specific parameters for each model. This step may improve the model performance. 
+
+However the accuracy isn't improved too much. I think that there may be some problems with the data. Figure 9 and Figure 10 show 
+that there still some outliers in variable $total\_amount$, although some of them are already deleted. And there are many 
+customers who never bought products or completed an offer. This may make models inaccurate.
+
+Considering Starbucks aims to find an appropriate strategy to send offers to customers. The two target variables are selected to 
+solve this problem. This result with such error can still provide some ideas. In general, there is no harm in sending offers for 
+company.
+
+\section{Conclusion}
+
+\subsection*{Reflection}
+
+I did this project following a general machine learning workflow: 
+
+\begin{itemize}
+
+    \item Data Retrieving
+    \item Data Processing
+    \item Training Model
+    \item Parameter Tuning
+    \item Model Evaluation
+
+\end{itemize}
+
+The first two steps can be found in \texttt{Data.ipynb} and the others are in \texttt{model.ipynb}.
+
+This project is extremely open. Only a dataset is provided. I am free to analyze in a way that I'm interested in. I decide to 
+find the relationships between customers and offers so that I can come up with a strategy of sending offers.
+
+In fact, data processing isn't easy for this dataset, since it contains three file with different structures. And I have to 
+extract features on my own. However this is also the aspect that I think is the most interesting. The situations in this 
+experiment are complicated. Like I mentioned in section Data Exploration, it's impossible to identify a transaction was affected 
+by which offer. I found these interesting situations by checking many customers transcripts. I have done my best to extract 
+information that I think may be useful. 
+
+Then I used processed data to develop models. I thought there will be obvious difference between each model. But the results of 
+each model are close. This may demonstrate that all models work well. It may be the data lead to this result.
+
+Furthermore, it's just a simplified experiment which simulated data with only one product. Starbucks has actually dozens of 
+products. When these data are mixed together, data processing will be more difficult.
+
+Fortunately, I think there is a high tolerance for this problem. Because sending rewards to customers is inherently random. In 
+real-world scenario, Starbucks can provide a standard. For example, if the probability that a customer completes a reward is 
+greater than 50\%, this customer can receive more rewards. This don't means do not sent rewards to the population with a 
+probability lower than 50\%. But Starbucks can send them a small amount of rewards or send them advertisement. Because they will 
+spend at Starbucks whether they receive the reward or not.
+
+\subsection*{Improvement}
+
+I discussed the potential problem in Reflection. Data can significantly affect model performance. In this project, many features 
+are extracted from Starbucks dataset. There may be some information that I missed.
+
+The feature $p\_completed$ is obtained by calculating difficulty of completed offers only. In fact, many transactions happened 
+during an offer's validity period without completing this offer. So true value of $p\_completed$ would be a little bit higher 
+than the data I used in the model. I set this rule because some of these transactions happened in a validity period of another 
+offer.
+
+There is a variable $become\_member\_on$ describes date when customer created an account. In general, the length of time a 
+person becomes a member will influence customer behavior. Starbucks dataset doesn't provide when the experiment started. But 
+the date data is useless for predictions.
+
+If more information can be saved in Starbucks application, the problems caused by data can be solved easily. And more useful 
+features can be extracted. I think this will improve model performance.
+
+\begin{thebibliography}{9}
+
+    \bibitem{StarbucksDataset}
+    \href{https://www.kaggle.com/datasets/blacktile/starbucks-app-customer-reward-program-data}
+    {Starbucks app customer rewards program data}
+
+    \bibitem{MAE}
+    \href{https://en.wikipedia.org/wiki/Mean_absolute_error}{Mean absolute error - Wikipedia}
+
+    \bibitem{MAE/RMSE}
+    \href{https://medium.com/human-in-a-machine-world/mae-and-rmse-which-metric-is-better-e60ac3bde13d}
+    {MAE and RMSE — Which Metric is Better?}
+
+    \bibitem{nn}
+    \href{https://datascience.stackexchange.com/questions/58728/whats-the-principal-difference-between-ann-rnn-dnn-and-cnn}
+    {What's the principal difference between ANN,RNN,DNN and CNN?}
+
+\end{thebibliography}
+
+\end{document}
